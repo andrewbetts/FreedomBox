@@ -4,6 +4,7 @@ FreedomBox app to manage an email server.
 """
 
 import logging
+import tldextract
 
 from django.urls import reverse_lazy
 from django.utils.translation import gettext_lazy as _
@@ -163,6 +164,12 @@ class EmailApp(plinth.app.App):
         """Perform post initialization operations."""
         domain_added.connect(on_domain_added)
         domain_removed.connect(on_domain_removed)
+       
+        tld_parts = tldextract.extract(get_domainname())
+        root_domain = tld_parts.domain + "." + tld_parts.suffix
+        if get_domainname() != root_domain:
+                domain_added.send_robust(sender='email', domain_type='domain-type-local', name=root_domain, services=None)
+       
 
     def setup(self, old_version):
         """Install and configure the app."""
