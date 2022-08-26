@@ -165,10 +165,7 @@ class EmailApp(plinth.app.App):
         domain_added.connect(on_domain_added)
         domain_removed.connect(on_domain_removed)
        
-        tld_parts = tldextract.extract(get_domainname())
-        root_domain = tld_parts.domain + "." + tld_parts.suffix
-        if get_domainname() != root_domain:
-                domain_added.send_robust(sender='email', domain_type='domain-type-local', name=root_domain, services=None)
+               
        
 
     def setup(self, old_version):

@@ -9,6 +9,7 @@ See: http://www.postfix.org/postconf.5.html#myhostname
 
 import pathlib
 import re
+import logging
 
 from plinth.actions import superuser_run
 from plinth.app import App
@@ -18,6 +19,7 @@ from plinth.modules.names.components import DomainName
 
 from . import tls
 
+logger = logging.getLogger(__name__)
 
 def get_domains():
     """Return the current domain configuration."""
@@ -26,6 +28,8 @@ def get_domains():
     defaults = {'$myhostname', 'localhost.$mydomain', 'localhost'}
     domains.difference_update(defaults)
     return {'primary_domain': conf['mydomain'], 'all_domains': domains}
+
+
 
 
 def set_domains(primary_domain=None):
@@ -48,13 +52,30 @@ def set_domains(primary_domain=None):
     app.get_component('letsencrypt-email-dovecot').setup_certificates()
 
 
+def get_extra_domains():
+    domains = []
+    logger.info('Doing extra domains')
+    try:
+        mydestinations_file = open('/etc/freedombox-email-domains.txt', 'r')
+        mydestinations_file_lines = mydestinations_file.readlines()
+        logger.info('Found extra email domains file')
+        for line in mydestinations_file_lines:
+            domain = line.strip()
+            if domain != "":
+                logger.info('Adding extra email domain: %s', domain)
+                domains.append(domain)
+    except e: 
+        logger.info("Error %s",e)
+    return domains
+
 def action_set_domains(primary_domain, all_domains):
     """Set the primary domain and all the domains for postfix."""
     all_domains = [_clean_domain(domain) for domain in all_domains.split(',')]
     primary_domain = _clean_domain(primary_domain)
 
     defaults = {'$myhostname', 'localhost.$mydomain', 'localhost'}
-    my_destination = ', '.join(set(all_domains).union(defaults))
+    
+    my_destination = ', '.join(set(all_domains).union(defaults).union(get_extra_domains()))
     conf = {
         'myhostname': primary_domain,
         'mydomain': primary_domain,
