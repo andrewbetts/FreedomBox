@@ -3,6 +3,7 @@
 Main FreedomBox views.
 """
 
+import datetime
 import time
 import urllib.parse
 
@@ -256,6 +257,11 @@ class AppView(FormView):
         context['has_diagnostics'] = self.app.has_diagnostics()
         context['port_forwarding_info'] = get_port_forwarding_info(self.app)
         context['app_enable_disable_form'] = self.get_enable_disable_form()
+        context['show_uninstall'] = not self.app.info.is_essential
+        context['operations'] = operation.manager.filter(self.app.app_id)
+        context['refresh_page_sec'] = None
+        if context['operations']:
+            context['refresh_page_sec'] = 3
 
         from plinth.modules.firewall.components import Firewall
         context['firewall'] = self.app.get_components_of_type(Firewall)
@@ -273,6 +279,7 @@ class SetupView(TemplateView):
         app_id = self.kwargs['app_id']
         app = app_module.App.get(app_id)
 
+        context['app_id'] = app.app_id
         context['app_info'] = app.info
 
         # Report any installed conflicting packages that will be removed.
@@ -282,8 +289,12 @@ class SetupView(TemplateView):
         context['package_conflicts_action'] = package_conflicts_action
 
         # Reuse the value of setup_state throughout the view for consistency.
-        context['setup_state'] = app.get_setup_state()
+        setup_state = app.get_setup_state()
+        context['setup_state'] = setup_state
         context['operations'] = operation.manager.filter(app.app_id)
+        context['show_uninstall'] = (
+            not app.info.is_essential
+            and setup_state != app_module.App.SetupState.NEEDS_SETUP)
 
         # Perform expensive operation only if needed.
         if not context['operations']:
@@ -343,6 +354,57 @@ class SetupView(TemplateView):
         components = app_.get_components_of_type(Packages)
         return any(component for component in components
                    if component.has_unavailable_packages())
+
+
+class UninstallView(FormView):
+    """View to uninstall apps."""
+
+    form_class = forms.UninstallForm
+    template_name = 'uninstall.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        """Don't allow the view to be used on essential apps."""
+        app_id = self.kwargs['app_id']
+        app = app_module.App.get(app_id)
+        if app.info.is_essential:
+            raise Http404
+
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, *args, **kwargs):
+        """Add app information to the context data."""
+        context = super().get_context_data(*args, **kwargs)
+        app_id = self.kwargs['app_id']
+        app = app_module.App.get(app_id)
+        context['app_info'] = app.info
+        return context
+
+    def get_success_url(self):
+        """Return the URL to redirect to after uninstall."""
+        return reverse(self.kwargs['app_id'] + ':index')
+
+    def form_valid(self, form):
+        """Uninstall the app."""
+        app_id = self.kwargs['app_id']
+
+        # Backup the app
+        if form.cleaned_data['should_backup']:
+            repository_id = form.cleaned_data['repository']
+
+            import plinth.modules.backups.repository as repository_module
+            repository = repository_module.get_instance(repository_id)
+            if repository.flags.get('mountable'):
+                repository.mount()
+
+            name = datetime.datetime.now().strftime(
+                '%Y-%m-%d:%H:%M:%S') + ' ' + str(
+                    _('before uninstall of {app_id}')).format(app_id=app_id)
+            repository.create_archive(name, [app_id])
+
+        # Uninstall
+        setup.run_uninstall_on_app(app_id)
+
+        return super().form_valid(form)
 
 
 def notification_dismiss(request, id):

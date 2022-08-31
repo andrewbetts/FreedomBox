@@ -34,11 +34,8 @@ logger = logging.getLogger(__name__)
 base_url = config['DEFAULT']['url']
 
 _app_checkbox_id = {
-    'tor': 'id_tor-enabled',
     'openvpn': 'id_openvpn-enabled',
 }
-
-_apps_with_loaders = ['tor']
 
 # unlisted sites just use '/' + site_name as url
 _site_url = {
@@ -160,7 +157,7 @@ def is_available(browser, site_name):
     browser.visit(url_to_visit)
     time.sleep(3)
     browser.reload()
-    if '404' in browser.title:
+    if '404' in browser.title or 'Page not found' in browser.title:
         return False
 
     # The site might have a default path after the sitename,
@@ -228,9 +225,6 @@ def change_checkbox_status(browser, app_name, checkbox_id,
 
     submit(browser, form_class='form-configuration')
 
-    if app_name in _apps_with_loaders:
-        wait_for_config_update(browser, app_name)
-
 
 def wait_for_config_update(browser, app_name):
     """Wait until the configuration update progress goes away.
@@ -241,7 +235,7 @@ def wait_for_config_update(browser, app_name):
 
     """
     script = 'return (document.readyState == "complete") && ' \
-        '(!Boolean(document.querySelector(".running-status.loading")));'
+        '(!Boolean(document.querySelector(".app-operation")));'
     while not browser.execute_script(script):
         time.sleep(0.1)
 
@@ -364,6 +358,34 @@ def install(browser, app_name):
             break
 
 
+def uninstall(browser, app_name):
+    """Uninstall the app if possible."""
+    nav_to_module(browser, app_name)
+    actions_button = browser.find_by_id('id_extra_actions_button')
+    if not actions_button:
+        pytest.skip('App cannot be uninstalled')
+
+    actions_button.click()
+    uninstall_item = browser.find_by_css('.uninstall-item')
+    if not uninstall_item:
+        pytest.skip('App cannot be uninstalled')
+
+    uninstall_item[0].click()
+    submit(browser, form_class='form-uninstall')
+
+    while True:
+        script = 'return (document.readyState == "complete") && ' \
+            '(!Boolean(document.querySelector(".app-operation")));'
+        if not browser.execute_script(script):
+            time.sleep(0.1)
+        elif browser.is_element_present_by_css('.neterror'):
+            browser.visit(browser.url)
+        elif browser.is_element_present_by_css('.alert-danger'):
+            raise RuntimeError('Uninstall failed')
+        else:
+            break
+
+
 ################################
 # App enable/disable utilities #
 ################################
@@ -381,9 +403,6 @@ def _change_app_status(browser, app_name, change_status_to='enabled'):
         checkbox_id = _app_checkbox_id[app_name]
         change_checkbox_status(browser, app_name, checkbox_id,
                                change_status_to)
-
-    if app_name in _apps_with_loaders:
-        wait_for_config_update(browser, app_name)
 
 
 def app_enable(browser, app_name):
@@ -678,3 +697,8 @@ class BaseAppTests:
         backup_create(session_browser, self.app_name, 'test_' + self.app_name)
         backup_restore(session_browser, self.app_name, 'test_' + self.app_name)
         self.assert_app_running(session_browser)
+
+    def test_uninstall(self, session_browser):
+        """Test that app can be uninstalled and installed back again."""
+        uninstall(session_browser, self.app_name)
+        install(session_browser, self.app_name)

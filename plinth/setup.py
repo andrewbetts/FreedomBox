@@ -30,10 +30,6 @@ _force_upgrader = None
 
 def run_setup_on_app(app_id, allow_install=True):
     """Execute the setup process in a thread."""
-    # Setup for the module is already running
-    if operation_module.manager.filter(app_id):
-        return
-
     # App is already up-to-date
     app = app_module.App.get(app_id)
     current_version = app.get_setup_version()
@@ -91,6 +87,50 @@ def _run_setup_on_app(app, current_version):
             message = gettext_noop('App updated')
 
     logger.info('Setup completed: %s: %s %s', app.app_id, message,
+                exception_to_update)
+    operation = operation_module.Operation.get_operation()
+    operation.on_update(message, exception_to_update)
+
+
+def run_uninstall_on_app(app_id):
+    """Execute the uninstall process in a thread."""
+    # App is already uninstalled
+    app = app_module.App.get(app_id)
+    if not app.get_setup_version():
+        return
+
+    logger.debug('Creating operation to uninstall app: %s', app_id)
+    return operation_module.manager.new(app_id,
+                                        gettext_noop('Uninstalling app'),
+                                        _run_uninstall_on_app, [app],
+                                        show_notification=True)
+
+
+def _run_uninstall_on_app(app):
+    """Execute the uninstall process."""
+    logger.info('Uninstall run: %s', app.app_id)
+    exception_to_update = None
+    message = None
+    try:
+        app.disable()
+        app.uninstall()
+        app.set_setup_version(0)
+    except PackageException as exception:
+        exception_to_update = exception
+        error_string = getattr(exception, 'error_string', str(exception))
+        error_details = getattr(exception, 'error_details', '')
+        message = gettext_noop('Error uninstalling app: {string} '
+                               '{details}').format(string=error_string,
+                                                   details=error_details)
+
+    except Exception as exception:
+        exception_to_update = exception
+        message = gettext_noop('Error uninstalling app: {error}').format(
+            error=exception)
+    else:
+        message = gettext_noop('App uninstalled.')
+
+    logger.info('Uninstall completed: %s: %s %s', app.app_id, message,
                 exception_to_update)
     operation = operation_module.Operation.get_operation()
     operation.on_update(message, exception_to_update)
